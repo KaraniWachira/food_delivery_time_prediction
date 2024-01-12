@@ -1,0 +1,328 @@
+---
+title: "Food Delivery Time Prediction"
+author: "Karani Keith"
+date: "2024-01-12"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+
+```
+
+
+
+```{r}
+train_df <- read_csv("data/train.csv")
+
+
+str(train_df)
+names(train_df)
+View(train_df)
+summary(train_df)
+```
+
+## Data Cleaning
+
+```{r}
+# Rename the specified column
+names(train_df)[names(train_df) == "Weatherconditions"] <- "Weather_conditions"
+
+# Print the result
+print(train_df)
+
+```
+
+### Data Extraction
+##  To retrieve specific and relevant information from the dataset
+```{r}
+# removing the “conditions” from the “Weather_conditions” column
+train_df$Weather_conditions <- sub('.* (\\S+).*', '\\1', train_df$Weather_conditions)
+
+print(train_df$Weather_conditions)
+
+# eliminating the “(min)” from the “Time_taken” column. 
+# Extract time and convert to numeric with error handling
+train_df$`Time_taken(min)` <- as.integer(sapply(strsplit(train_df$`Time_taken(min)`, ' '), function(x) {
+  numeric_part <- sub('.*\\((\\d+)\\).*', '\\1', x[2])
+  if (length(numeric_part) > 0 && all(grepl("^\\d+$", numeric_part))) {
+    return(numeric_part)
+  } else {
+    return(NA)
+  }
+}))
+
+head(train_df)
+
+
+# extracting the city name from the “Delivery_person_ID” column
+train_df$City_code <- sapply(strsplit(as.character(train_df$Delivery_person_ID), "RES"), function(x) {
+  if (length(x) > 1) {
+    return(x[1])
+  } else {
+    return(NA)
+  }
+})
+
+
+# print results
+print(train_df$City_code)
+```
+
+
+### Update Data Types
+## update the data types of features to their most appropriate formats
+```{r}
+# Update datatype from character to numeric (float)
+train_df$Delivery_person_Age <- as.numeric(train_df$Delivery_person_Age)
+
+train_df$Delivery_person_Ratings <- as.numeric(train_df$Delivery_person_Ratings)
+
+train_df$multiple_deliveries <- as.numeric(train_df$multiple_deliveries)
+
+# Update datatype from character to Date ##ORDER DATE WRONG
+train_df$Order_Date <- as.Date(train_df$Order_Date, format="%d-%m-%Y")
+
+unique(train_df$Order_Date)
+any(is.na(train_df$Order_Date))
+
+View(train_df)
+```
+
+### Drop Columns
+## eliminate ID and Delivery_person_ID columns columns since they solely serve as unique identifiers
+```{r}
+# Drop columns 'ID' and 'Delivery_person_ID'
+train_df <- train_df[, !(names(train_df) %in% c('ID', 'Delivery_person_ID'))]
+
+print(train_df)
+
+```
+
+### Check fro Duplicate Values
+## check for any duplicate values in the dataset to ensure data accuracy and eliminate bias
+## If duplicates are found, I will need to remove them to maintain the integrity of the data
+
+```{r}
+# Check for Duplicate Values
+if (sum(duplicated(train_df)) > 0) {
+  print("There are Duplicate values present")
+} else {
+  print("There is no duplicate value present")
+}
+
+```
+ 
+ ### Handle Missing Values
+ ## I will convert NaN strings to NA and then calculate and print the count of missing values for each feature
+
+```{r}
+# Replace 'NaN' with NA
+train_df[train_df == 'NaN'] <- NA 
+
+# show count of NA values in data
+na_count <- colSums(is.na(train_df))
+na_count <- na_count[order(na_count, decreasing = TRUE)]  # Sort values in descending order
+
+print(na_count)
+```
+
+### Given the presence of NaN values in multiple columns, visualizing these columns would be beneficial for identifying patterns and determining the optimal approach to handle null values for each feature
+
+```{r}
+# Define the columns to visualize
+cols <- c('Delivery_person_Age', 'Delivery_person_Ratings', 'Weather_conditions', 
+          'Road_traffic_density', 'multiple_deliveries', 'Festival', 'City')
+
+# Gather the data into long format
+df_long <- train_df %>%
+  gather(key = "name", value = "value", cols)
+
+# Create a single ggplot object with facets
+ggplot(df_long, aes(x = reorder(factor(value), -table(value)[value]), fill = value)) +
+  geom_bar() +
+  labs(x = "Value", y = 'No. of Orders') +
+  facet_wrap(~name, scales = 'free_x', ncol = 2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+### Observations
+ 1. For Delivery_person_Age and Weather_conditions, which display nearly uniform           distributions, the missing values will be filled randomly
+ 2. As for Delivery_person_Ratings, which exhibits a left-skewed distribution, the missing     values will be filled with the median
+ 3. For the remaining categorical columns, the missing values will be filled with the mode, representing the most frequently occurring value in each respective column
+ 
+
+```{r}
+# Handle null values
+train_df$Delivery_person_Age <- ifelse(is.na(train_df$Delivery_person_Age),
+                                       sample(train_df$Delivery_person_Age, sum(is.na(train_df$Delivery_person_Age)), replace = TRUE),
+                                       train_df$Delivery_person_Age)
+
+train_df$Weather_conditions <- ifelse(is.na(train_df$Weather_conditions),
+                                      sample(train_df$Weather_conditions, sum(is.na(train_df$Weather_conditions)), replace = TRUE),
+                                      train_df$Weather_conditions)
+
+train_df$City <- ifelse(is.na(train_df$City),
+                       mode(train_df$City)[1],
+                       train_df$City)
+
+train_df$Festival <- ifelse(is.na(train_df$Festival),
+                           mode(train_df$Festival)[1],
+                           train_df$Festival)
+
+train_df$multiple_deliveries <- ifelse(is.na(train_df$multiple_deliveries),
+                                       mode(train_df$multiple_deliveries)[1],
+                                       train_df$multiple_deliveries)
+
+train_df$Road_traffic_density <- ifelse(is.na(train_df$Road_traffic_density),
+                                        mode(train_df$Road_traffic_density)[1],
+                                        train_df$Road_traffic_density)
+
+train_df$Delivery_person_Ratings <- ifelse(is.na(train_df$Delivery_person_Ratings),
+                                           median(train_df$Delivery_person_Ratings, na.rm = TRUE),
+                                           train_df$Delivery_person_Ratings)
+
+# Check for null values
+print(colSums(is.na(train_df)))
+
+
+```
+
+
+### Note 
+## At present, I have not addressed the NaN values in the Time_Ordered column. However, I will handle them in the next section after converting the column to a datetime object.
+
+
+#### Feature Engineering
+
+## I carefully select, transform, and generate meaningful features from the data, aiming to enhance the performance of our machine learning models.
+
+## I my case I have access to features like order date, order time, and picked time, which provide ample opportunities for creating multiple new features that can help in capturing and utilizing various aspects of time-related information.
+
+## Furthermore, latitude and longitude features for both the restaurant and delivery location. Leveraging this information, I can calculate the distance between the two locations, adding yet another valuable feature to our dataset.
+
+
+# Feature 1
+```{r}
+# new features based on the Order Date
+library(lubridate)
+
+# Convert 'Order_Date' to Date type if it's not already
+train_df$Order_Date <- as.Date(train_df$Order_Date, format="%d-%m-%Y")
+
+# Extract date features
+train_df <- train_df %>%
+  mutate(day = day(Order_Date),
+         month = month(Order_Date),
+         quarter = quarter(Order_Date),
+         year = year(Order_Date),
+         day_of_week = wday(Order_Date, label = TRUE),
+         is_month_start = as.integer(format(Order_Date, "%d") == "01"),
+         is_month_end = as.integer(format(Order_Date, "%d") == as.character(days_in_month(Order_Date))),
+         is_quarter_start = as.integer(month(Order_Date) %% 3 == 1 & day(Order_Date) == 1),
+         is_quarter_end = as.integer(month(Order_Date) %% 3 == 0 & day(Order_Date) == as.character(days_in_month(Order_Date))),
+         is_year_start = as.integer(format(Order_Date, "%m-%d") == "01-01"),
+         is_year_end = as.integer(format(Order_Date, "%m-%d") == "12-31"),
+         is_weekend = as.integer(weekdays(Order_Date) %in% c("Saturday", "Sunday"))
+  )
+
+# Print the result
+print(train_df)
+
+```
+
+# Feature 2
+### I will create a new feature that highlights the difference between the order time and the pickup time
+### As part of this step, I will drop all the time and date-related features
+
+
+```{r}
+
+calculate_time_diff <- function(train_df) {
+  # Convert character times to time objects
+  train_df$Time_Orderd <- as.POSIXct(train_df$Time_Orderd, format = "%H:%M:%S")
+  train_df$Time_Order_picked <- as.POSIXct(train_df$Time_Order_picked, format = "%H:%M:%S")
+
+  # Combine date and time columns
+  train_df$Time_Order_picked_formatted <- as.POSIXct(
+    paste(train_df$Order_Date, train_df$Time_Order_picked), format = "%Y-%m-%d %H:%M:%S"
+  )
+  train_df$Time_Ordered_formatted <- as.POSIXct(
+    paste(train_df$Order_Date, train_df$Time_Orderd), format = "%Y-%m-%d %H:%M:%S"
+  )
+
+  # Adjust for potential day difference
+  train_df$Time_Order_picked_formatted <- ifelse(
+    train_df$Time_Order_picked < train_df$Time_Orderd,
+    train_df$Time_Order_picked_formatted + 86400,  # Add a day if picked time is earlier
+    train_df$Time_Order_picked_formatted
+  )
+
+  # Calculate time difference in minutes
+  train_df$order_prepare_time <- difftime(train_df$Time_Order_picked_formatted, train_df$Time_Ordered_formatted, units = "mins")
+
+  # Handle missing values with median
+  train_df$order_prepare_time[is.na(train_df$order_prepare_time)] <- median(train_df$order_prepare_time, na.rm = TRUE)
+
+  # Drop unnecessary columns
+  train_df <- train_df[, -which(names(train_df) %in% c("Time_Orderd", "Time_Order_picked", "Time_Ordered_formatted", "Time_Order_picked_formatted", "Order_Date"))]
+
+  return(train_df)
+}
+
+# print the results
+print(train_df)
+
+## OUPUTS NA VALUE SO DEBUG
+```
+
+#Feature 03
+
+### Calculate the distance between the restaurant location and the delivery location and create a new feature called distance
+```{r}
+# Load required libraries
+library(geosphere)
+
+# Calculate distance between restaurant and delivery locations
+train_df$distance <- geosphere::distVincentySphere(
+  p1 = train_df[c('Restaurant_longitude', 'Restaurant_latitude')],
+  p2 = train_df[c('Delivery_location_longitude', 'Delivery_location_latitude')]
+)
+# Convert distance to meters (assuming the distance is initially in kilometers)
+train_df$distance <- train_df$distance * 1000
+
+# Convert distance to integer
+train_df$distance <- as.integer(train_df$distance)
+
+# Print the result
+print(train_df)
+```
+
+#### Data Preprocessing 
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
