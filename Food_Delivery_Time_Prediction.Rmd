@@ -43,7 +43,7 @@ train_df$Weather_conditions <- sub('.* (\\S+).*', '\\1', train_df$Weather_condit
 print(train_df$Weather_conditions)
 
 # eliminating the “(min)” from the “Time_taken” column. 
-# Extract time and convert to numeric with error handling
+# Extract time and convert to numeric {{{with error handling}}}
 train_df$`Time_taken(min)` <- as.integer(sapply(strsplit(train_df$`Time_taken(min)`, ' '), function(x) {
   numeric_part <- sub('.*\\((\\d+)\\).*', '\\1', x[2])
   if (length(numeric_part) > 0 && all(grepl("^\\d+$", numeric_part))) {
@@ -96,7 +96,8 @@ View(train_df)
 # Drop columns 'ID' and 'Delivery_person_ID'
 train_df <- train_df[, !(names(train_df) %in% c('ID', 'Delivery_person_ID'))]
 
-print(train_df)
+
+is.na(train_df) 
 
 ```
 
@@ -125,6 +126,7 @@ train_df[train_df == 'NaN'] <- NA
 na_count <- colSums(is.na(train_df))
 na_count <- na_count[order(na_count, decreasing = TRUE)]  # Sort values in descending order
 
+View(na_count)
 print(na_count)
 ```
 
@@ -187,6 +189,7 @@ train_df$Delivery_person_Ratings <- ifelse(is.na(train_df$Delivery_person_Rating
 # Check for null values
 print(colSums(is.na(train_df)))
 
+View(train_df)
 
 ```
 
@@ -196,13 +199,11 @@ print(colSums(is.na(train_df)))
 
 
 #### Feature Engineering
-
 ## I carefully select, transform, and generate meaningful features from the data, aiming to enhance the performance of our machine learning models.
 
-## I my case I have access to features like order date, order time, and picked time, which provide ample opportunities for creating multiple new features that can help in capturing and utilizing various aspects of time-related information.
+## In my case I have access to features like order date, order time, and picked time, which provide ample opportunities for creating multiple new features that can help in capturing and utilizing various aspects of time-related information.
 
 ## Furthermore, latitude and longitude features for both the restaurant and delivery location. Leveraging this information, I can calculate the distance between the two locations, adding yet another valuable feature to our dataset.
-
 
 # Feature 1
 ```{r}
@@ -230,6 +231,7 @@ train_df <- train_df %>%
 
 # Print the result
 print(train_df)
+View(train_df)
 
 ```
 
@@ -275,7 +277,7 @@ calculate_time_diff <- function(train_df) {
 # print the results
 print(train_df)
 
-## OUPUTS NA VALUE SO DEBUG
+## all good
 ```
 
 #Feature 03
@@ -298,17 +300,138 @@ train_df$distance <- as.integer(train_df$distance)
 
 # Print the result
 print(train_df)
+
+View(train_df)
 ```
 
 #### Data Preprocessing 
 
+## Catergorical feature encoding
 ```{r}
+# Label Encoding is being used due to the presence of multiple features with categorical values. assigns a unique numerical label to each category within a feature
+
+label_encoding <- function(train_df) {
+  categorical_columns <- names(train_df)[sapply(train_df, is.factor)]
+  
+  for (col in categorical_columns) {
+    train_df[[col]] <- as.numeric(as.factor(train_df[[col]]))
+  }
+}
+
+# Assuming train_df is a data frame in R
+label_encoding(train_df)
+
+View(train_df)
+```
+
+#### Split Training and Testing data
+
+```{r}
+library(caret)
+
+# Features (X)
+X <- train_df[, -which(names(train_df) == "`Time_taken(min)`")]
+
+# Target variable (y)
+y <- train_df$`Time_taken(min)`
+
+# Set seed for reproducibility
+set.seed(42)
+
+# Split the data into train and test sets
+splitIndex <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[splitIndex, ]
+X_test <- X[-splitIndex, ]
+y_train <- y[splitIndex]
+y_test <- y[-splitIndex]
 
 ```
 
+#### standardization
+
+## To address the issue of varying scales in the food delivery dataset.It will transform the features to have a zero mean and a unit standard deviation by doing so, it ensure that no single feature dominates the learning process and enable a fair comparison among the features.
+## Standardization facilitates faster convergence and enhances the overall performance of the machine learning model.
+
+```{r}
+
+library(caret)
+
+# identify numeric columns
+numeric_cols <- sapply(X_train, is.numeric)
+
+# Create a preProcess object for standardization
+preprocess <- preProcess(X_train,  method = c("center", "scale"))
+
+# Apply the standardization transformation to the training data
+X_train <- predict(preprocess, newdata = X_train)
+
+# Apply the standardization transformation to the training data
+X_test <- predict(preprocess, newdata = X_train)
+
+# Apply the standardization transformation to the testing data
+X_test <- predict(preprocess, newdata = X_test)
 
 
+# This approach manually standardizes the data using the mean and standard deviation computed from the training set.
+```
 
+#### Model Building
+
+## I will train a machine learning model to predict the food delivery time, which falls under the domain of regression problems since I aim to predict a numerical value
+
+## To determine the most suitable algorithm for our data, we can use the Metrics function from Yardstick package which.
+
+```{r}
+library(tidymodels)
+library(Metrics)
+
+# Define the models
+models <- list(
+  lm = lm, # linear model
+  rpart = train, # decision trees model
+  rf = train,  # random forest model
+  xgbTree = train #XGBoost model
+)
+
+# Define the parameter grid
+param_grid <- list(
+  lm = list(),
+  rpart = list(maxdepth = c(3, 5, 7)),
+  rf = list(ntree = c(100, 200, 300)),
+  xgbTree = list(nrounds = c(20, 25, 30), max_depth = c(5, 7, 9))
+)
+
+# Initialize results lists
+best_params <- list()
+best_r2_scores <- list()
+
+# Train and tune models
+for (i in seq_along(models)) {
+  model_name <- names(models)[i]
+  
+  # Create a caret train control
+  ctrl <- trainControl(method = "cv", number = 5, summaryFunction = twoClassSummary, classProbs = TRUE, verboseIter = TRUE)
+  
+   # Perform grid search
+  grid_search <- train(
+    x = X_train,
+    y = y_train,
+    method = model_name,  # Corrected this line
+    tuneGrid = param_grid[[model_name]],
+    trControl = ctrl,
+    metric = "R2"
+  )
+  
+  # Store results
+  best_params[[model_name]] <- grid_search$bestTune
+  best_r2_scores[[model_name]] <- grid_search$results$R2
+  
+  cat(paste0(model_name, ":\n"))
+  cat("Best parameters:", best_params[[model_name]], "\n")
+  cat("Best R2 score:", max(best_r2_scores[[model_name]]), "\n\n")
+}
+
+```
 
 
 
