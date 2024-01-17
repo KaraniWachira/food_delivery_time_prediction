@@ -383,49 +383,59 @@ X_test <- predict(preprocess, newdata = X_test)
 ## To determine the most suitable algorithm for our data, we can use the Metrics function from Yardstick package which.
 
 ```{r}
-
+# Load required libraries
+library(Metrics)
 library(tidymodels)
-library(parsnip)
-library(rsample)
-library(yardstick)
 
-# Load your data (assuming X_train and y_train are data frames)
+# Assuming X_train and y_train are already loaded as data frames
 
-# Define models using parsnip
-lm_model <- linear_reg()
-tree_model <- decision_tree(cost_complexity = tune())
-rf_model <- rand_forest(mtry = tune(), trees = tune())
+# Combine X_train and y_train into a single data frame
+train_data <- bind_cols(X_train, y_train)
 
-# Define a recipe for preprocessing (adjust as needed)
-recipe <- recipe(y_train ~ ., data = X_train) %>%
-  # Add necessary preprocessing steps here, e.g.,
-  # step_normalize(all_numeric())
+# Define models
+models <- c("lm", "rpart", "rf")
 
-# Create a resampling object for cross-validation
-cv <- vfold_cv(X_train, v = 5)
+# Initialize a list to store results
+results <- list()
 
-# Create a workflow for each model
-workflows <- list(
-  lm_workflow = workflow() %>% add_model(lm_model) %>% add_recipe(recipe),
-  tree_workflow = workflow() %>% add_model(tree_model) %>% add_recipe(recipe),
-  rf_workflow = workflow() %>% add_model(rf_model) %>% add_recipe(recipe)
-)
+# Loop through models
+for (model_name in models) {
+  # Define the model
+  model <- switch(
+    model_name,
+    lm = linear_reg(),
+    rpart = decision_tree(mode = "regression"),
+    rf = rand_forest(mode = "regression")
+  )
 
-# Tune each model using tune_grid
-tuned_models <- map(workflows, tune_grid, resamples = cv, grid = param_grid)
+  # Create a recipe
+  recipe_formula <- as.formula(paste("y_train ~ ."))
+  recipe <- recipe(recipe_formula, data = train_data) %>%
+    update_role(all_predictors(), new_role = "predictor") %>%
+    update_role(all_outcomes(), new_role = "outcome")
 
-# Fit the best models
-final_models <- map(tuned_models, select_best) %>%
-  map(fit, X_train)
+  # Create a workflow
+  workflow <- workflow() %>%
+    add_recipe(recipe) %>%
+    add_model(model)
 
-# Evaluate performance
-results <- map(final_models, collect_metrics, metric = "rmse")
+  # Train the model
+  trained_model <- workflow %>%
+    fit(data = train_data)
+
+  # Store the results
+  results[[model_name]] <- list(
+    model = model_name,
+    trained_model = trained_model
+  )
+}
 
 # Display results
-for (i in seq_along(results)) {
-  cat(names(final_models)[i], ":\n")
-  print(results[[i]])
+for (model_name in models) {
+  cat(model_name, ":\n")
+  cat("Trained model:", results[[model_name]]$trained_model, "\n")
 }
+
 
 
 ```
