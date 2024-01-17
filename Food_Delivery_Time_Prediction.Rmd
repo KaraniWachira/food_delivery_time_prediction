@@ -322,6 +322,7 @@ label_encoding <- function(train_df) {
 label_encoding(train_df)
 
 View(train_df)
+
 ```
 
 #### Split Training and Testing data
@@ -353,7 +354,6 @@ y_test <- y[-splitIndex]
 ## Standardization facilitates faster convergence and enhances the overall performance of the machine learning model.
 
 ```{r}
-
 library(caret)
 
 # identify numeric columns
@@ -372,6 +372,7 @@ X_test <- predict(preprocess, newdata = X_train)
 X_test <- predict(preprocess, newdata = X_test)
 
 
+
 # This approach manually standardizes the data using the mean and standard deviation computed from the training set.
 ```
 
@@ -382,61 +383,52 @@ X_test <- predict(preprocess, newdata = X_test)
 ## To determine the most suitable algorithm for our data, we can use the Metrics function from Yardstick package which.
 
 ```{r}
+
 library(tidymodels)
-library(Metrics)
+library(parsnip)
+library(rsample)
+library(yardstick)
 
-# Define the models
-models <- list(
-  lm = lm, # linear model
-  rpart = train, # decision trees model
-  rf = train,  # random forest model
-  xgbTree = train #XGBoost model
+# Load your data (assuming X_train and y_train are data frames)
+
+# Define models using parsnip
+lm_model <- linear_reg()
+tree_model <- decision_tree(cost_complexity = tune())
+rf_model <- rand_forest(mtry = tune(), trees = tune())
+
+# Define a recipe for preprocessing (adjust as needed)
+recipe <- recipe(y_train ~ ., data = X_train) %>%
+  # Add necessary preprocessing steps here, e.g.,
+  # step_normalize(all_numeric())
+
+# Create a resampling object for cross-validation
+cv <- vfold_cv(X_train, v = 5)
+
+# Create a workflow for each model
+workflows <- list(
+  lm_workflow = workflow() %>% add_model(lm_model) %>% add_recipe(recipe),
+  tree_workflow = workflow() %>% add_model(tree_model) %>% add_recipe(recipe),
+  rf_workflow = workflow() %>% add_model(rf_model) %>% add_recipe(recipe)
 )
 
-# Define the parameter grid
-param_grid <- list(
-  lm = list(),
-  rpart = list(maxdepth = c(3, 5, 7)),
-  rf = list(ntree = c(100, 200, 300)),
-  xgbTree = list(nrounds = c(20, 25, 30), max_depth = c(5, 7, 9))
-)
+# Tune each model using tune_grid
+tuned_models <- map(workflows, tune_grid, resamples = cv, grid = param_grid)
 
-# Initialize results lists
-best_params <- list()
-best_r2_scores <- list()
+# Fit the best models
+final_models <- map(tuned_models, select_best) %>%
+  map(fit, X_train)
 
-# Train and tune models
-for (i in seq_along(models)) {
-  model_name <- names(models)[i]
-  
-  # Create a caret train control
-  ctrl <- trainControl(method = "cv", number = 5, summaryFunction = twoClassSummary, classProbs = TRUE, verboseIter = TRUE)
-  
-   # Perform grid search
-  grid_search <- train(
-    x = X_train,
-    y = y_train,
-    method = model_name,  # Corrected this line
-    tuneGrid = param_grid[[model_name]],
-    trControl = ctrl,
-    metric = "R2"
-  )
-  
-  # Store results
-  best_params[[model_name]] <- grid_search$bestTune
-  best_r2_scores[[model_name]] <- grid_search$results$R2
-  
-  cat(paste0(model_name, ":\n"))
-  cat("Best parameters:", best_params[[model_name]], "\n")
-  cat("Best R2 score:", max(best_r2_scores[[model_name]]), "\n\n")
+# Evaluate performance
+results <- map(final_models, collect_metrics, metric = "rmse")
+
+# Display results
+for (i in seq_along(results)) {
+  cat(names(final_models)[i], ":\n")
+  print(results[[i]])
 }
 
+
 ```
-
-
-
-
-
 
 
 
