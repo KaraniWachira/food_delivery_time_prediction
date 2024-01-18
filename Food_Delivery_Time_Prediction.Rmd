@@ -239,47 +239,50 @@ View(train_df)
 ### I will create a new feature that highlights the difference between the order time and the pickup time
 ### As part of this step, I will drop all the time and date-related features
 
-
 ```{r}
 
-calculate_time_diff <- function(train_df) {
-  # Convert character times to time objects
-  train_df$Time_Orderd <- as.POSIXct(train_df$Time_Orderd, format = "%H:%M:%S")
-  train_df$Time_Order_picked <- as.POSIXct(train_df$Time_Order_picked, format = "%H:%M:%S")
+library(dplyr)
+library(lubridate)
 
-  # Combine date and time columns
-  train_df$Time_Order_picked_formatted <- as.POSIXct(
-    paste(train_df$Order_Date, train_df$Time_Order_picked), format = "%Y-%m-%d %H:%M:%S"
-  )
-  train_df$Time_Ordered_formatted <- as.POSIXct(
-    paste(train_df$Order_Date, train_df$Time_Orderd), format = "%Y-%m-%d %H:%M:%S"
-  )
-
-  # Adjust for potential day difference
-  train_df$Time_Order_picked_formatted <- ifelse(
-    train_df$Time_Order_picked < train_df$Time_Orderd,
-    train_df$Time_Order_picked_formatted + 86400,  # Add a day if picked time is earlier
-    train_df$Time_Order_picked_formatted
-  )
-
-  # Calculate time difference in minutes
-  train_df$order_prepare_time <- difftime(train_df$Time_Order_picked_formatted, train_df$Time_Ordered_formatted, units = "mins")
-
-  # Handle missing values with median
-  train_df$order_prepare_time[is.na(train_df$order_prepare_time)] <- median(train_df$order_prepare_time, na.rm = TRUE)
-
-  # Drop unnecessary columns
-  train_df <- train_df[, -which(names(train_df) %in% c("Time_Orderd", "Time_Order_picked", "Time_Ordered_formatted", "Time_Order_picked_formatted", "Order_Date"))]
-
-  return(train_df)
+calculate_time_diff <- function(df) {
+  # Convert columns to time duration
+  df$Time_Orderd <- as.duration(df$Time_Orderd)
+  df$Time_Order_picked <- as.duration(df$Time_Order_picked)
+  
+  # Print intermediate results for debugging
+  print("After duration conversion:")
+  print(df)
+  
+  # Calculate formatted times
+  df$Time_Order_picked_formatted <- df$Order_Date + ifelse(df$Time_Order_picked < df$Time_Orderd, days(1), days(0)) + df$Time_Order_picked
+  df$Time_Ordered_formatted <- df$Order_Date + df$Time_Orderd
+  
+  # Print intermediate results for debugging
+  print("After formatted times calculation:")
+  print(df)
+  
+  # Calculate order_prepare_time in minutes
+  df$order_prepare_time <- as.numeric(df$Time_Order_picked_formatted - df$Time_Ordered_formatted) / 60
+  
+  # Print intermediate results for debugging
+  print("After order_prepare_time calculation:")
+  print(df)
+  
+  # Handle null values by filling with the median
+  df$order_prepare_time[is.na(df$order_prepare_time)] <- median(df$order_prepare_time, na.rm = TRUE)
+  
+  # Drop columns
+  df <- df %>%
+    select(-c("Time_Orderd", "Time_Order_picked", "Time_Ordered_formatted", "Time_Order_picked_formatted", "Order_Date"))
+  
+  return(df)
 }
 
-# print the results
-print(train_df)
+# Assuming train_df is your data frame
+train_df <- calculate_time_diff(train_df)
+head(train_df)
 
-View(train_df)
 
-## all good
 ```
 
 #Feature 03
@@ -295,7 +298,7 @@ train_df$distance <- geosphere::distVincentySphere(
   p2 = train_df[c('Delivery_location_longitude', 'Delivery_location_latitude')]
 )
 # Convert distance to meters (assuming the distance is initially in kilometers)
-train_df$distance <- train_df$distance * 1000
+train_df$distance <- train_df$distance / 1000
 
 # Convert distance to integer
 train_df$distance <- as.integer(train_df$distance)
@@ -304,6 +307,26 @@ train_df$distance <- as.integer(train_df$distance)
 print(train_df)
 ```
 
+#### Map showing the different delivery points from the restaurant the meals were ordered from
+
+```{r}
+library(ggmap)
+
+data_frame <- train_df
+
+center <- c(mean(data_frame$Restaurant_longitude), mean(data_frame$Restaurant_latitude))
+map <- get_map(center, zoom = 12)
+
+# Create the scatter plot on top of the map
+ggmap(map) +
+  geom_point(
+    aes(x = Longitude, y = Latitude),
+    data = data_frame,
+    color = "red",  # Customize color if desired
+    size = 4     # Customize point size if desired
+  )
+
+```
 #### Data Preprocessing 
 
 ## Catergorical feature encoding to transform categorical values into numerical representations.
@@ -334,8 +357,24 @@ print(df_encoded)
 #### Split Training and Testing data
 
 ```{r}
+library(tidymodels)
 
+# Load the initial dataset
+df_train <- read.csv("data/train.csv")  # Replace with your actual data file
 
+# Split the data with initial_split
+df_split <- initial_split(df_train, prop = 0.8)
+
+# Extract training and testing sets
+train_df <- training(df_split)
+test_df  <- testing(df_split)
+
+# Prepare the recipe (assuming your existing recipe is stored as "rec")
+rec_prep <- prep(rec, training = train_df)
+
+# Apply the prepared recipe to both sets
+train_data <- juice(rec_prep)  # Apply to training data directly
+test_data <- juice(rec_prep, new_data = test_df)  # Apply to testing data
 
 
 ```
