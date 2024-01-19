@@ -8,9 +8,9 @@ output: html_document
 
 ```{r}
 library(tidyverse)
+library(tidymodels)
 
 ```
-
 
 
 ```{r}
@@ -20,11 +20,16 @@ train_df <- read_csv("data/train.csv")
 str(train_df)
 names(train_df)
 View(train_df)
+
+```
+
+
+```{r}
 summary(train_df)
+
 ```
 
 ## Data Cleaning
-
 ```{r}
 # Rename the specified column
 names(train_df)[names(train_df) == "Weatherconditions"] <- "Weather_conditions"
@@ -44,7 +49,8 @@ print(train_df$Weather_conditions)
 
 # eliminating the “(min)” from the “Time_taken” column. 
 # Extract time and convert to numeric {{{with error handling}}}
-train_df$`Time_taken(min)` <- as.integer(sapply(strsplit(train_df$`Time_taken(min)`, ' '), function(x) {
+train_df$`Time_taken(min)` <- as.integer(sapply(strsplit(train_df$`Time_taken(min)`,' '),
+  function(x) {
   numeric_part <- sub('.*\\((\\d+)\\).*', '\\1', x[2])
   if (length(numeric_part) > 0 && all(grepl("^\\d+$", numeric_part))) {
     return(numeric_part)
@@ -55,7 +61,11 @@ train_df$`Time_taken(min)` <- as.integer(sapply(strsplit(train_df$`Time_taken(mi
 
 head(train_df)
 
+```
 
+# Extracting the city name from the “Delivery_person_ID” column, we can obtain a valuable variable that will aid us in the development of our model
+
+```{r}
 # extracting the city name from the “Delivery_person_ID” column
 train_df$City_code <- sapply(strsplit(as.character(train_df$Delivery_person_ID), "RES"), function(x) {
   if (length(x) > 1) {
@@ -64,7 +74,6 @@ train_df$City_code <- sapply(strsplit(as.character(train_df$Delivery_person_ID),
     return(NA)
   }
 })
-
 
 # print results
 print(train_df$City_code)
@@ -75,14 +84,14 @@ print(train_df$City_code)
 ## update the data types of features to their most appropriate formats
 ```{r}
 # Update datatype from character to numeric (float)
-train_df$Delivery_person_Age <- as.numeric(train_df$Delivery_person_Age)
+train_df$Delivery_person_Age <- as.numeric(as.character(train_df$Delivery_person_Age))
 
-train_df$Delivery_person_Ratings <- as.numeric(train_df$Delivery_person_Ratings)
+train_df$Delivery_person_Ratings <- as.numeric(as.character(train_df$Delivery_person_Ratings))
 
-train_df$multiple_deliveries <- as.numeric(train_df$multiple_deliveries)
+train_df$multiple_deliveries <- as.numeric(as.character(train_df$multiple_deliveries))
 
-# Update datatype from character to Date ##ORDER DATE WRONG
-train_df$Order_Date <- as.Date(train_df$Order_Date, format="%d-%m-%Y")
+# Convert to Date, handling incorrect values
+train_df$Order_Date <- as.Date(train_df$Order_Date, format="%d-%m-%Y", errors = "coerce")
 
 unique(train_df$Order_Date)
 any(is.na(train_df$Order_Date))
@@ -96,14 +105,12 @@ View(train_df)
 # Drop columns 'ID' and 'Delivery_person_ID'
 train_df <- train_df[, !(names(train_df) %in% c('ID', 'Delivery_person_ID'))]
 
-
 is.na(train_df) 
 
 ```
 
-### Check fro Duplicate Values
-## check for any duplicate values in the dataset to ensure data accuracy and eliminate bias
-## If duplicates are found, I will need to remove them to maintain the integrity of the data
+### Check for Duplicate Values
+## To ensure data accuracy and eliminate bias
 
 ```{r}
 # Check for Duplicate Values
@@ -115,8 +122,8 @@ if (sum(duplicated(train_df)) > 0) {
 
 ```
  
- ### Handle Missing Values
- ## I will convert NaN strings to NA and then calculate and print the count of missing values for each feature
+### Handle Missing Values
+## I will convert NaN strings to NA and then calculate and print the count of missing values for each feature
 
 ```{r}
 # Replace 'NaN' with NA
@@ -150,12 +157,12 @@ ggplot(df_long, aes(x = reorder(factor(value), -table(value)[value]), fill = val
 
 
 ```
+
 ### Observations
  1. For Delivery_person_Age and Weather_conditions, which display nearly uniform           distributions, the missing values will be filled randomly
  2. As for Delivery_person_Ratings, which exhibits a left-skewed distribution, the missing     values will be filled with the median
  3. For the remaining categorical columns, the missing values will be filled with the mode, representing the most frequently occurring value in each respective column
  
-
 ```{r}
 # Handle null values
 train_df$Delivery_person_Age <- ifelse(is.na(train_df$Delivery_person_Age),
@@ -205,7 +212,7 @@ View(train_df)
 
 ## Furthermore, latitude and longitude features for both the restaurant and delivery location. Leveraging this information, I can calculate the distance between the two locations, adding yet another valuable feature to our dataset.
 
-# Feature 1
+# Feature 01
 ```{r}
 # new features based on the Order Date
 library(lubridate)
@@ -235,59 +242,51 @@ View(train_df)
 
 ```
 
-# Feature 2
+# Feature 02
 ### I will create a new feature that highlights the difference between the order time and the pickup time
 ### As part of this step, I will drop all the time and date-related features
 
 ```{r}
 
-library(dplyr)
-library(lubridate)
+calculate_time_diff <- function(train_df) {
+  # Convert character times to time objects
+  train_df$Time_Orderd <- as.POSIXct(train_df$Time_Orderd, format = "%H:%M:%S")
+  train_df$Time_Order_picked <- as.POSIXct(train_df$Time_Order_picked, format = "%H:%M:%S")
 
-calculate_time_diff <- function(df) {
-  # Convert columns to time duration
-  df$Time_Orderd <- as.duration(df$Time_Orderd)
-  df$Time_Order_picked <- as.duration(df$Time_Order_picked)
-  
-  # Print intermediate results for debugging
-  print("After duration conversion:")
-  print(df)
-  
-  # Calculate formatted times
-  df$Time_Order_picked_formatted <- df$Order_Date + ifelse(df$Time_Order_picked < df$Time_Orderd, days(1), days(0)) + df$Time_Order_picked
-  df$Time_Ordered_formatted <- df$Order_Date + df$Time_Orderd
-  
-  # Print intermediate results for debugging
-  print("After formatted times calculation:")
-  print(df)
-  
-  # Calculate order_prepare_time in minutes
-  df$order_prepare_time <- as.numeric(df$Time_Order_picked_formatted - df$Time_Ordered_formatted) / 60
-  
-  # Print intermediate results for debugging
-  print("After order_prepare_time calculation:")
-  print(df)
-  
-  # Handle null values by filling with the median
-  df$order_prepare_time[is.na(df$order_prepare_time)] <- median(df$order_prepare_time, na.rm = TRUE)
-  
-  # Drop columns
-  df <- df %>%
-    select(-c("Time_Orderd", "Time_Order_picked", "Time_Ordered_formatted", "Time_Order_picked_formatted", "Order_Date"))
-  
-  return(df)
+  # Combine date and time columns
+  train_df$Time_Order_picked_formatted <- as.POSIXct(
+    paste(train_df$Order_Date, train_df$Time_Order_picked), format = "%Y-%m-%d %H:%M:%S"
+  )
+  train_df$Time_Ordered_formatted <- as.POSIXct(
+    paste(train_df$Order_Date, train_df$Time_Orderd), format = "%Y-%m-%d %H:%M:%S"
+  )
+
+  # Adjust for potential day difference
+  train_df$Time_Order_picked_formatted <- ifelse(
+    train_df$Time_Order_picked < train_df$Time_Orderd,
+    train_df$Time_Order_picked_formatted + 86400,  # Add a day if picked time is earlier
+    train_df$Time_Order_picked_formatted
+  )
+
+  # Calculate time difference in minutes
+  train_df$order_prepare_time <- difftime(train_df$Time_Order_picked_formatted, train_df$Time_Ordered_formatted, units = "mins")
+
+  # Handle missing values with median
+  train_df$order_prepare_time[is.na(train_df$order_prepare_time)] <- median(train_df$order_prepare_time, na.rm = TRUE)
+
+  # Drop unnecessary columns
+  train_df <- train_df[, -which(names(train_df) %in% c("Time_Orderd", "Time_Order_picked", "Time_Ordered_formatted", "Time_Order_picked_formatted", "Order_Date"))]
+
+  return(train_df)
 }
 
-# Assuming train_df is your data frame
-train_df <- calculate_time_diff(train_df)
-head(train_df)
-
+print(train_df)
 
 ```
 
-#Feature 03
-
+# Feature 03
 ### Calculate the distance between the restaurant location and the delivery location and create a new feature called distance
+
 ```{r}
 # Load required libraries
 library(geosphere)
@@ -305,84 +304,102 @@ train_df$distance <- as.integer(train_df$distance)
 
 # Print the result
 print(train_df)
+
+
+
 ```
 
-#### Map showing the different delivery points from the restaurant the meals were ordered from
+# Data Preprocessing
+
+## Categorical Feature Encoding
+```{r}
+
+label_encoding <- function(df) {
+  # Identify categorical columns
+  categorical_columns <- names(df)[sapply(df, is.character)]
+
+  # Apply label encoding to each categorical column
+  for (col in categorical_columns) {
+    df[[col]] <- as.numeric(factor(df[[col]], levels = unique(df[[col]])))
+  }
+  
+  # Return the modified DataFrame
+  return(df)
+}
+# Apply label encoding
+df_train <- label_encoding(train_df)
+
+View(df_train)
+
+```
+
 
 ```{r}
-library(ggmap)
+colnames(df_train)[colnames(df_train) == "Time_taken(min)"] <- "Time_taken_min"
 
-data_frame <- train_df
-
-center <- c(mean(data_frame$Restaurant_longitude), mean(data_frame$Restaurant_latitude))
-map <- get_map(center, zoom = 12)
-
-# Create the scatter plot on top of the map
-ggmap(map) +
-  geom_point(
-    aes(x = Longitude, y = Latitude),
-    data = data_frame,
-    color = "red",  # Customize color if desired
-    size = 4     # Customize point size if desired
-  )
-
-```
-#### Data Preprocessing 
-
-## Catergorical feature encoding to transform categorical values into numerical representations.
-```{r}
-library(recipes)
-library(dplyr)
-
-# Define recipe
-rec <- recipe(formula = ~ ., data = train_df)
-
-# Specify target role (optional for encoding, but recommended for clarity)
-rec <- rec %>% update_role(`Time_taken(min)`, new_role = "outcome")
-
-# Select only categorical features
-rec <- rec %>% step_select(all_nominal())
-
-# Apply one-hot encoding
-rec <- rec %>% step_dummy(all_nominal())
-
-# Prepare and bake the recipe
-rec_prep <- prep(rec, data = train_df)
-df_encoded <- bake(rec_prep, new_data = train_df)
-
-print(df_encoded)
-
+View(df_train)
 ```
 
-#### Split Training and Testing data
+
+# Split Training & Testing Data
 
 ```{r}
 library(tidymodels)
 
-# Load the initial dataset
-df_train <- read.csv("data/train.csv")  # Replace with your actual data file
+X <- select(df_train, -Time_taken_min) # Features
+y <- df_train$Time_taken_min # Target variable
 
-# Split the data with initial_split
-df_split <- initial_split(df_train, prop = 0.8)
+set.seed(123)
 
-# Extract training and testing sets
-train_df <- training(df_split)
-test_df  <- testing(df_split)
+# split the data into train and test sets
+split_obj <- initial_split(df_train, prop = 0.8, strata = "Time_taken_min")
+train_data <- training(split_obj)
+test_data <- testing(split_obj)
 
-# Prepare the recipe (assuming your existing recipe is stored as "rec")
-rec_prep <- prep(rec, training = train_df)
+# Print summary statistics
+summary(split_obj)
 
-# Apply the prepared recipe to both sets
-train_data <- juice(rec_prep)  # Apply to training data directly
-test_data <- juice(rec_prep, new_data = test_df)  # Apply to testing data
+dim(split_obj)
+
+```
+
+# Standardisation: scaling on the predictors
+## process involves transforming the features to have a zero mean and a unit standard deviation. To ensure that no single feature dominates the learning process and enable a fair comparison among the features.
+
+```{r}
+library(tidymodels)
+
+# Identify numeric predictors
+numeric_predictors <- names(Filter(is.numeric, train_data))
+
+# Identify non-categorical numeric predictors (excluding dates)
+non_cat_numeric_predictors <- setdiff(numeric_predictors, c("Order_Date", "Time_Order_picked"))
+
+# Identify non-numeric predictors
+non_numeric_predictors <- setdiff(names(train_data), numeric_predictors)
+
+# Identify categorical predictors
+categorical_predictors <- setdiff(names(train_data), numeric_predictors)
+
+# Create a recipe
+preprocess_recipe <- recipe(Time_taken_min ~ ., data = train_data) %>%
+  step_scale(all_of(non_cat_numeric_predictors)) %>% 
+  step_center(all_of(non_cat_numeric_predictors)) %>%
+  step_dummy(all_nominal(), -all_numeric())  # Treat categorical variables as dummy variables
+
+# Fit the recipe on the training data
+preprocess_model <- prep(preprocess_recipe, training = train_data)
+
+# Perform standardization on the training data
+X_train <- bake(preprocess_model, new_data = train_data)
+
+# Perform standardization on the testing data
+X_test <- bake(preprocess_model, new_data = test_data)
 
 
 ```
 
-#### standardization
 
-## To address the issue of varying scales in the food delivery dataset.It will transform the features to have a zero mean and a unit standard deviation by doing so, it ensure that no single feature dominates the learning process and enable a fair comparison among the features.
-## Standardization facilitates faster convergence and enhances the overall performance of the machine learning model.
 
 ```{r}
 
@@ -390,16 +407,10 @@ test_data <- juice(rec_prep, new_data = test_df)  # Apply to testing data
 
 ```
 
-#### Model Building
-
-## I will train a machine learning model to predict the food delivery time, which falls under the domain of regression problems since I aim to predict a numerical value
-
-## To determine the most suitable algorithm for our data, we can use the Metrics function from Yardstick package which.
-
-```{r}
 
 
-```
+
+
 
 
 
