@@ -359,11 +359,10 @@ test_data <- testing(split_obj)
 # Print summary statistics
 summary(split_obj)
 
-dim(split_obj)
-
 ```
+# creating recipes
 
-# Standardisation: scaling on the predictors
+## Standardisation: scaling on the predictors
 ## process involves transforming the features to have a zero mean and a unit standard deviation. To ensure that no single feature dominates the learning process and enable a fair comparison among the features.
 
 ```{r}
@@ -372,40 +371,117 @@ library(tidymodels)
 # Identify numeric predictors
 numeric_predictors <- names(Filter(is.numeric, train_data))
 
-# Identify non-categorical numeric predictors (excluding dates)
-non_cat_numeric_predictors <- setdiff(numeric_predictors, c("Order_Date", "Time_Order_picked"))
-
 # Identify non-numeric predictors
 non_numeric_predictors <- setdiff(names(train_data), numeric_predictors)
 
 # Identify categorical predictors
 categorical_predictors <- setdiff(names(train_data), numeric_predictors)
 
-# Create a recipe
-preprocess_recipe <- recipe(Time_taken_min ~ ., data = train_data) %>%
-  step_scale(all_of(non_cat_numeric_predictors)) %>% 
-  step_center(all_of(non_cat_numeric_predictors)) %>%
-  step_dummy(all_nominal(), -all_numeric())  # Treat categorical variables as dummy variables
+# Use mean for numeric columns
+train_data <- train_data %>%
+  mutate(
+    Delivery_person_Age = ifelse(is.na(Delivery_person_Age), mean(Delivery_person_Age, na.rm = TRUE), Delivery_person_Age),
+    Delivery_person_Ratings = ifelse(is.na(Delivery_person_Ratings), mean(Delivery_person_Ratings, na.rm = TRUE), Delivery_person_Ratings),
+    multiple_deliveries = ifelse(is.na(multiple_deliveries), mean(multiple_deliveries, na.rm = TRUE), multiple_deliveries)
+  )
 
-# Fit the recipe on the training data
+# Create a recipe excluding step_rm
+preprocess_recipe <- recipe(Time_taken_min ~ ., data = train_data) %>%
+  # Include all numeric columns for scaling and centering
+  step_scale(all_of(numeric_predictors)) %>%
+  step_center(all_of(numeric_predictors)) %>%
+  # Include all nominal columns for dummy variable creation
+  step_dummy(all_nominal())
+
+# Fit the recipe on the full training data
 preprocess_model <- prep(preprocess_recipe, training = train_data)
 
 # Perform standardization on the training data
-X_train <- bake(preprocess_model, new_data = train_data)
+X_train <- bake(preprocess_model, new_data = train_data) %>% 
+  select(-all_of(non_numeric_predictors))
 
 # Perform standardization on the testing data
-X_test <- bake(preprocess_model, new_data = test_data)
+X_test <- bake(preprocess_model, new_data = test_data) %>% 
+  select(-all_of(non_numeric_predictors))
 
 
 ```
 
+# Model Building
+## train a machine learning model to predict the food delivery time
 
+```{r}
+library(ranger)
+
+# Define the outcome variable
+outcome_variable <- "Time_taken_min"
+
+# Define models
+linear_model <- linear_reg() %>%
+  set_mode("regression") %>%
+  set_engine("lm")
+
+tree_model <- decision_tree(mode = "regression") %>%
+  set_mode("regression") %>%
+  set_engine("rpart")
+
+rf_model <- rand_forest(mode = "regression") %>%
+  set_mode("regression") %>%
+  set_engine("ranger")
+
+  xgb_model <- boost_tree(mtry = tune(), trees = tune(), tree_depth = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost")
+
+# Create a workflow for each model
+linear_workflow <- workflow() %>%
+  add_recipe(preprocess_recipe) %>%
+  add_model(linear_model)
+
+tree_workflow <- workflow() %>%
+  add_recipe(preprocess_recipe) %>%
+  add_model(tree_model)
+
+rf_workflow <- workflow() %>%
+  add_recipe(preprocess_recipe) %>%
+  add_model(rf_model)
+
+xgb_workflow <- workflow() %>%
+  add_recipe(preprocess_recipe) %>%
+  add_model(xgb_model)
+
+# Train the models
+ linear_fit <- fit(linear_workflow, data = train_data)
+ tree_fit <- fit(tree_workflow, data = train_data)
+ rf_fit <- fit(rf_workflow, data = train_data)
+ xgb_fit <- fit(xgb_workflow, data = train_data)
+
+# Make predictions on the test set
+ linear_preds <- predict(linear_fit, new_data = X_test)
+ tree_preds <- predict(tree_fit, new_data = X_test)
+ rf_preds <- predict(rf_fit, new_data = X_test)
+ xgb_preds <- predict(xgb_fit, new_data = X_test)
+
+```
+
+# Evaluate the models
 
 ```{r}
 
+# Evaluate the models (e.g., using RMSE)
+linear_rmse <- rmse(linear_preds, X_test[[outcome_variable]])
+tree_rmse <- rmse(tree_preds, X_test[[outcome_variable]])
+rf_rmse <- rmse(rf_preds, X_test[[outcome_variable]])
+xgb_rmse <- rmse(xgb_preds, X_test[[outcome_variable]])
 
+# Print RMSE values
+cat("Linear Regression RMSE:", linear_rmse, "\n")
+cat("Decision Tree RMSE:", tree_rmse, "\n")
+cat("Random Forest RMSE:", rf_rmse, "\n")
+cat("XGBoost RMSE:", xgb_rmse, "\n")
 
 ```
+
 
 
 
